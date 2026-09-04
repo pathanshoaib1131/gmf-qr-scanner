@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#063b67">
+<title>GMF Secure QR Scanner V21</title>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+<style>
+:root{--b:#0b4f8a;--b2:#063b67;--bg:#eef5fb;--card:#fff;--line:#d9e5ef;--txt:#17324d;--muted:#6b7f91;--bad:#b42318;--good:#16834b}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font:16px system-ui,-apple-system,Segoe UI,Arial}header{background:linear-gradient(135deg,var(--b2),var(--b));color:#fff;padding:15px}main{max-width:720px;margin:auto;padding:14px}.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px;margin-bottom:12px;box-shadow:0 8px 28px #14375512}.btn{border:0;border-radius:12px;background:var(--b);color:#fff;padding:13px 16px;min-height:48px;font-weight:800;cursor:pointer}.btn.secondary{background:#e8f2fb;color:var(--b)}.btn.bad{background:var(--bad)}.row{display:flex;gap:9px;flex-wrap:wrap;align-items:center}.muted{color:var(--muted)}.small{font-size:12px}.status{padding:12px;border-radius:12px;background:#f4f8fb}.success{background:#e9f7ef}.danger{background:#fdecea}.scanbox{min-height:340px;border-radius:16px;overflow:hidden;background:#091c2c;display:flex;align-items:center;justify-content:center}.scanbox video{width:100%!important;height:auto!important;max-height:62vh;object-fit:cover;display:block}.input{width:100%;border:1px solid #c9d8e5;border-radius:11px;padding:12px;min-height:46px}.hidden{display:none!important}.result{word-break:break-all;font-size:13px}
+</style>
+</head>
+<body>
+<header><b>GMF Secure QR Scanner V21</b><div class="small">Fast native camera · Chrome · Brave · Safari</div></header>
+<main>
+<div class="card">
+  <div id="status" class="status">Ready. Press <b>Start Camera</b> and allow camera access.</div>
+  <div id="reader" class="scanbox" style="margin-top:12px"><video id="video" playsinline muted autoplay></video></div>
+  <canvas id="canvas" class="hidden"></canvas>
+  <div class="row" style="margin-top:12px">
+    <button id="start" class="btn">Start Camera</button>
+    <button id="stop" class="btn secondary">Stop</button>
+    <button id="switch" class="btn secondary">Switch Camera</button>
+    <button id="returnBtn" class="btn secondary">↩ Return to GMF App</button>
+  </div>
+</div>
+<div class="card">
+  <h3>Photo QR Backup</h3>
+  <button id="fileBtn" class="btn secondary">📷 Scan QR From Photo</button>
+  <input id="file" class="hidden" type="file" accept="image/*">
+  <div class="small muted" style="margin-top:8px">Use a clear close-up image with the entire QR visible.</div>
+</div>
+<div class="card"><b>Last scan</b><div id="result" class="result muted" style="margin-top:8px">Nothing scanned yet.</div></div>
+</main>
+<script>
+(function(){'use strict';
+const p=new URLSearchParams(location.search), returnUrl=p.get('return')||'', mode=(p.get('mode')||'ANY').toUpperCase();
+const statusEl=document.getElementById('status'), resultEl=document.getElementById('result'), video=document.getElementById('video'), canvas=document.getElementById('canvas'), ctx=canvas.getContext('2d',{willReadFrequently:true});
+let stream=null, scanning=false, busy=false, facing='environment', raf=0;
+function status(m,k){statusEl.className='status '+(k||'');statusEl.innerHTML=m}
+function validReturn(u){try{const x=new URL(u);return x.protocol==='https:'&&x.hostname==='script.google.com'&&/^\/macros\/s\/[^/]+\/exec$/.test(x.pathname)}catch(e){return false}}
+function extract(text){const raw=String(text||'').trim();try{const u=new URL(raw);return{raw,bin:u.searchParams.get('bin')||'',wc:u.searchParams.get('wc')||'',pack:u.searchParams.get('pack')||'',trace:u.searchParams.get('trace')||''}}catch(e){return{raw,bin:/^BIN-[A-Z0-9_-]+$/i.test(raw)?raw:'',wc:/^(BFG|NFG|HT|COATING|NTAP|PACK)[A-Z0-9_-]*$/i.test(raw)?raw:''}}}
+function allowed(x){return mode==='BIN'?!!x.bin:!!(x.bin||x.wc||x.pack||x.trace||x.raw)}
+function stopCamera(){scanning=false;if(raf){cancelAnimationFrame(raf);raf=0}if(stream){stream.getTracks().forEach(t=>{try{t.stop()}catch(e){}});stream=null}video.srcObject=null}
+function goBack(){stopCamera();if(validReturn(returnUrl)){location.replace(returnUrl)}else{history.back()}}
+function finish(text){if(busy)return;const x=extract(text);if(!allowed(x)){status('This QR is not valid for the current scan mode. Please scan a GMF QR.','danger');return}busy=true;resultEl.textContent=x.raw;status('QR captured. Returning to GMF…','success');stopCamera();if(validReturn(returnUrl)){const sep=returnUrl.indexOf('?')>=0?'&':'?';location.replace(returnUrl+sep+'scan='+encodeURIComponent(x.raw))}else{history.back()}}
+async function startCamera(){if(busy)return;try{stopCamera();if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)throw new Error('This browser does not support camera access.');status('Requesting camera permission…');stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:facing},width:{ideal:1280},height:{ideal:720}},audio:false});video.srcObject=stream;await video.play();scanning=true;status('Camera active. Point the rear camera at a GMF QR code.','success');scanLoop()}catch(e){stopCamera();status('Camera unavailable. '+(e&&e.message?e.message:'Allow camera permission and reload the page.'),'danger')}}
+function scanLoop(){if(!scanning||busy)return;if(video.readyState>=2&&video.videoWidth&&video.videoHeight){const max=900,scale=Math.min(1,max/video.videoWidth);canvas.width=Math.round(video.videoWidth*scale);canvas.height=Math.round(video.videoHeight*scale);ctx.drawImage(video,0,0,canvas.width,canvas.height);const d=ctx.getImageData(0,0,canvas.width,canvas.height);const code=window.jsQR?window.jsQR(d.data,d.width,d.height,{inversionAttempts:'attemptBoth'}):null;if(code&&code.data){finish(code.data);return}}raf=requestAnimationFrame(scanLoop)}
+async function switchCamera(){facing=facing==='environment'?'user':'environment';await startCamera()}
+async function scanPhoto(file){if(!file||busy)return;status('Reading QR from photo…');try{const img=new Image(),url=URL.createObjectURL(file);await new Promise((res,rej)=>{img.onload=res;img.onerror=rej;img.src=url});const max=2400,scale=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight));canvas.width=Math.round(img.naturalWidth*scale);canvas.height=Math.round(img.naturalHeight*scale);ctx.drawImage(img,0,0,canvas.width,canvas.height);URL.revokeObjectURL(url);const d=ctx.getImageData(0,0,canvas.width,canvas.height);const code=window.jsQR?window.jsQR(d.data,d.width,d.height,{inversionAttempts:'attemptBoth'}):null;if(code&&code.data)finish(code.data);else status('Could not read a QR code from this photo. Use a clear close-up image or Start Camera.','danger')}catch(e){status('Could not read this photo. Try another clear QR image.','danger')}}
+if(!validReturn(returnUrl)){status('Invalid return address. Open the scanner from the GMF Web App.','danger')}
+document.getElementById('start').onclick=startCamera;document.getElementById('stop').onclick=()=>{stopCamera();status('Camera stopped.')};document.getElementById('switch').onclick=switchCamera;document.getElementById('returnBtn').onclick=goBack;document.getElementById('fileBtn').onclick=()=>document.getElementById('file').click();document.getElementById('file').onchange=e=>{const f=e.target.files&&e.target.files[0];e.target.value='';scanPhoto(f)};window.addEventListener('pagehide',stopCamera);
+})();
+</script>
+</body>
+</html>
